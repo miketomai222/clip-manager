@@ -1,0 +1,14 @@
+[project]
+name = "clip-manager"
+version = "0.1.0"
+description = "A clipboard manager for Ubuntu, inspired by Ditto"
+requires-python = ">=3.11"
+dependencies = [
+    "PyGObject",
+    "dbus-python",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]

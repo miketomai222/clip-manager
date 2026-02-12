@@ -14,7 +14,7 @@ A clipboard manager for Ubuntu, inspired by [Ditto](https://github.com/sabrogden
 | **Tauri (Rust + Webview)** | Modern web-based UI; lightweight (~5MB); Rust backend for performance; easy to make pretty | Extra complexity bridging frontend/backend; clipboard monitoring still needs native code; web UI may feel out of place |
 | **Electron** | Easiest UI development (HTML/CSS/JS); huge ecosystem | Heavy resource usage (~100MB+ RAM); feels out of place on Linux; overkill for this |
 
-**Recommendation:** Python + GTK for fastest path to a working tool. Rust + GTK if performance and long-term maintainability matter more.
+**Decision:** Python + GTK4. The native look & feel is critical, and GTK4 is the future of GNOME. The performance impact is negligible for this use case.
 
 ---
 
@@ -31,7 +31,7 @@ A clipboard manager for Ubuntu, inspired by [Ditto](https://github.com/sabrogden
 - **Global hotkeys:** No protocol for global shortcuts in base Wayland. Options: `xdg-desktop-portal` (GNOME 41+), compositor-specific (KDE has shortcuts portal), or D-Bus.
 - **Paste to previous window:** Wayland doesn't let you programmatically focus/type into another window. Options: `xdotool` (X11 only), `ydotool` (Wayland), `wtype`, or portal-based input simulation.
 
-**Recommendation:** Target Wayland-first with X11 fallback, since Ubuntu defaults to Wayland.
+**Decision:** Wayland-first (Ubuntu 24.04 defaults to Wayland). X11 fallback deferred — not needed for the target environment.
 
 ---
 
@@ -48,7 +48,7 @@ A clipboard manager for Ubuntu, inspired by [Ditto](https://github.com/sabrogden
 - Need a max history size / max entry size policy to prevent runaway disk usage.
 - Consider deduplication (don't store the same text string twice in a row).
 
-**Recommendation:** Start with Text + Images, design the storage layer to be extensible to all formats.
+**Decision:** Start with Text + Images, design the storage layer to be extensible to all formats.
 
 ---
 
@@ -94,7 +94,7 @@ A clipboard manager for Ubuntu, inspired by [Ditto](https://github.com/sabrogden
 | **Plain files (JSON/YAML)** | Simple; human-readable; easy to debug | Slow search at scale; no indexing; fragile |
 | **LevelDB / RocksDB** | Fast key-value lookups; handles binary well | No SQL; harder to query; extra dependency |
 
-**Recommendation:** SQLite with FTS5. Battle-tested for this kind of local app.
+**Decision:** SQLite with FTS5. Battle-tested for this kind of local app.
 
 ---
 
@@ -107,6 +107,9 @@ A clipboard manager for Ubuntu, inspired by [Ditto](https://github.com/sabrogden
 | **Rofi/dmenu-style** | Minimal launcher-style popup; keyboard-first; no window chrome. Feels native to tiling WM users. |
 | **Hybrid** | List view for text, grid for images; toggle between them. |
 
+**Decision:** Vertical list (Ditto-style)
+
+
 ---
 
 ### 5c. Daemon Architecture
@@ -117,7 +120,7 @@ A clipboard manager for Ubuntu, inspired by [Ditto](https://github.com/sabrogden
 | **Daemon + UI client** | Separate background service (systemd user unit) for clipboard monitoring + DB. Separate UI process launched on hotkey. More robust, cleaner separation. |
 | **D-Bus service** | Daemon exposes a D-Bus API. UI (or third-party tools) communicate via D-Bus. Most extensible. |
 
-**Recommendation:** Daemon + UI client with D-Bus communication. The daemon runs as a systemd user service, monitors the clipboard, and stores entries. The UI is a lightweight popup spawned on hotkey.
+**Decision:** Daemon + UI client with D-Bus communication. The daemon runs as a systemd user service, monitors the clipboard, and stores entries. The UI is a lightweight popup spawned on hotkey.
 
 ---
 
@@ -166,15 +169,15 @@ A clipboard manager for Ubuntu, inspired by [Ditto](https://github.com/sabrogden
 
 ---
 
-## 6. Open Questions (Need Your Input)
+## 6. Decided Answers
 
-1. **What Ubuntu version are you on?** (Determines Wayland maturity, GTK version, portal availability)
-2. **Do you use GNOME, KDE, or another desktop environment?** (Affects hotkey registration, tray icon, theming)
-3. **Do you use a tiling WM or the default GNOME shell?** (Affects popup positioning and UI style preference)
-4. **How large should the history be by default?** (Ditto defaults to 500 entries)
-5. **Do you need it to survive reboots?** (Persistent DB vs in-memory only)
-6. **Is network sync between machines important, or is this single-machine only?**
-7. **Do you have a preferred hotkey in mind?** (Ditto uses Ctrl+`, common alternatives: Super+V, Ctrl+Shift+V)
-8. **Should it integrate with existing tools?** (e.g., work alongside `gpaste`, expose a CLI, provide a Rofi mode)
-9. **What's your Python/Rust experience level?** (Affects tech stack recommendation)
-10. **Is this for personal use or do you plan to distribute it?** (Affects packaging priority)
+1. **Ubuntu version:** 24.04 LTS (GNOME 46, GTK 4.14, Wayland)
+2. **Desktop environment:** GNOME Shell (default Ubuntu desktop)
+3. **Tiling WM?** No — default GNOME Shell
+4. **History size:** 500 entries (matches Ditto default)
+5. **Survive reboots?** Yes — persistent SQLite database
+6. **Network sync?** No — single machine, local only
+7. **Hotkey:** Ctrl+\` (same as Ditto)
+8. **Tool integration?** GUI popup only, no CLI
+9. **Language:** Python 
+10. **Distribution:** Personal use only - install bash script
