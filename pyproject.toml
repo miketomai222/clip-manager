@@ -12,3 +12,6 @@ dependencies = [
 dev = [
     "pytest",
 ]
+
+[tool.setuptools.packages.find]
+include = ["clip_common*", "clipd*", "clip_ui*"]

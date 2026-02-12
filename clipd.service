@@ -1,0 +1,14 @@
+[Unit]
+Description=Clip Manager Daemon
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/clip-manager/venv/bin/python3 -m clipd
+WorkingDirectory=%h/.local/share/clip-manager
+Restart=on-failure
+RestartSec=3
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=default.target
