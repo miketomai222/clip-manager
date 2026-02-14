@@ -16,7 +16,7 @@ logger = logging.getLogger("clipd")
 
 def run_test_clipboard():
     """Run in test mode: print clipboard changes to stdout and exit."""
-    import time
+    from gi.repository import GLib
 
     from clipd.clipboard import WlPasteWatcher
 
@@ -26,9 +26,9 @@ def run_test_clipboard():
     watcher = WlPasteWatcher(on_new_clip=on_clip)
     watcher.start()
 
+    loop = GLib.MainLoop()
     try:
-        while True:
-            time.sleep(0.1)
+        loop.run()
     except KeyboardInterrupt:
         pass
     finally:
@@ -59,6 +59,17 @@ def run_daemon():
 
     logger.info("Starting clip-manager daemon v%s", __version__)
     logger.info("Config: max_history=%d, db=%s", config.max_history, config.db_path)
+
+    # Debug heartbeat: confirms GLib main loop is processing timer events
+    _heartbeat_count = [0]
+
+    def _heartbeat():
+        _heartbeat_count[0] += 1
+        logger.info("heartbeat #%d — GLib main loop is alive", _heartbeat_count[0])
+        return True  # keep firing
+
+    GLib.timeout_add_seconds(5, _heartbeat)
+
     watcher.start()
 
     loop = GLib.MainLoop()
@@ -77,7 +88,12 @@ def main():
     parser.add_argument("--version", action="version", version=f"clipd {__version__}")
     parser.add_argument("--test-clipboard", action="store_true",
                         help="Test mode: print clipboard changes to stdout")
+    parser.add_argument("--debug", action="store_true",
+                        help="Enable DEBUG-level logging")
     args = parser.parse_args()
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     if args.test_clipboard:
         run_test_clipboard()
