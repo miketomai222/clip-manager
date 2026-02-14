@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "PyGObject",
     "dbus-python",
+    "python-xlib",
 ]
 
 [project.optional-dependencies]
