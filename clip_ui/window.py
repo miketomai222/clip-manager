@@ -105,6 +105,7 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         self._search_entry.set_margin_top(8)
         self._search_entry.set_margin_bottom(4)
         self._search_entry.connect("search-changed", self._on_search_changed)
+        self._search_entry.connect("activate", self._on_search_activate)
         vbox.append(self._search_entry)
 
         # Scrolled window for clip list
@@ -227,6 +228,12 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         self._search_timeout_id = GLib.timeout_add(
             150, self._do_search, entry.get_text()
         )
+
+    def _on_search_activate(self, entry):
+        """Handle Enter in the search entry — select the highlighted clip."""
+        selected = self._listbox.get_selected_row()
+        if selected:
+            self._on_row_activated(self._listbox, selected)
 
     def _do_search(self, query: str):
         self._search_timeout_id = None
