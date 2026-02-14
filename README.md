@@ -14,6 +14,7 @@ Python 3.11+ with a GTK4 popup UI, D-Bus IPC, and SQLite storage with full-text 
 - Runs as a systemd user service
 - Deduplication — consecutive identical copies are stored once
 - Configurable history size (default 500 clips)
+- Local only
 
 ## Installation
 
