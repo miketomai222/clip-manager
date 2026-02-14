@@ -34,7 +34,7 @@ echo "Setting up Python environment..."
 if [ ! -d "$INSTALL_DIR/venv" ]; then
     python3 -m venv "$INSTALL_DIR/venv" --system-site-packages
 fi
-"$INSTALL_DIR/venv/bin/pip" install -q -e "$INSTALL_DIR"
+"$INSTALL_DIR/venv/bin/pip" install -q "$INSTALL_DIR"
 
 # Install systemd service
 echo "Installing systemd service..."

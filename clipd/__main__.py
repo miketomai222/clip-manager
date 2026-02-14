@@ -60,16 +60,6 @@ def run_daemon():
     logger.info("Starting clip-manager daemon v%s", __version__)
     logger.info("Config: max_history=%d, db=%s", config.max_history, config.db_path)
 
-    # Debug heartbeat: confirms GLib main loop is processing timer events
-    _heartbeat_count = [0]
-
-    def _heartbeat():
-        _heartbeat_count[0] += 1
-        logger.info("heartbeat #%d — GLib main loop is alive", _heartbeat_count[0])
-        return True  # keep firing
-
-    GLib.timeout_add_seconds(5, _heartbeat)
-
     watcher.start()
 
     loop = GLib.MainLoop()
@@ -94,6 +84,7 @@ def main():
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
 
     if args.test_clipboard:
         run_test_clipboard()
