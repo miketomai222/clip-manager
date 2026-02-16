@@ -87,6 +87,8 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         self._daemon = None
         self._clips: list[dict] = []
         self._search_timeout_id = None
+        self._focus_check_id = None
+        self._closed = False
 
         # Window setup - popup style
         self.set_default_size(600, 450)
@@ -170,7 +172,7 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         if self._daemon is None:
             try:
                 self._daemon = _get_daemon_proxy()
-            except dbus.exceptions.DBusException:
+            except Exception:
                 logger.error("Cannot connect to clip-manager daemon")
         return self._daemon
 
@@ -178,14 +180,15 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         """Load recent clips from the daemon."""
         daemon = self._get_daemon()
         if not daemon:
-            return
+            return False
 
         try:
             result = daemon.GetRecent(dbus.UInt32(50))
             self._clips = json.loads(str(result))
             self._populate_list(self._clips)
-        except dbus.exceptions.DBusException:
+        except Exception:
             logger.exception("Failed to load clips")
+        return False  # Never repeat
 
     def _search_clips(self, query: str):
         """Search clips via daemon."""
@@ -200,7 +203,7 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
                 result = daemon.GetRecent(dbus.UInt32(50))
             clips = json.loads(str(result))
             self._populate_list(clips)
-        except dbus.exceptions.DBusException:
+        except Exception:
             logger.exception("Failed to search clips")
 
     def _populate_list(self, clips: list[dict]):
@@ -254,10 +257,11 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         if daemon:
             try:
                 daemon.SelectEntry(dbus.UInt32(clip_data["id"]))
-            except dbus.exceptions.DBusException:
+            except Exception:
                 logger.exception("Failed to select clip")
 
         # Hide window first, then paste
+        self._closed = True
         self.close()
 
         # Small delay to let focus return, then simulate Ctrl+V
@@ -278,6 +282,7 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
     def _on_key_pressed(self, controller, keyval, keycode, state):
         """Handle keyboard shortcuts."""
         if keyval == Gdk.KEY_Escape:
+            self._closed = True
             self.close()
             return True
 
@@ -310,10 +315,18 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
 
     def _on_focus_leave(self, controller):
         """Close window when it loses focus."""
-        # Small delay to avoid closing during internal focus changes
-        GLib.timeout_add(100, self._check_focus)
+        if self._closed:
+            return
+        # Guard against multiple pending checks
+        if self._focus_check_id is not None:
+            return
+        self._focus_check_id = GLib.timeout_add(100, self._check_focus)
 
     def _check_focus(self):
+        self._focus_check_id = None
+        if self._closed:
+            return False
         if not self.is_active():
+            self._closed = True
             self.close()
         return False
