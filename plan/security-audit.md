@@ -17,12 +17,12 @@
 | 6 | Pinned clips exempt from all limits | MEDIUM | Open |
 | 7 | Config/DB paths not validated for symlinks | MEDIUM | Open |
 | 8 | `db_path` config accepts arbitrary locations | MEDIUM | Open |
-| 9 | Systemd service has no sandboxing (9.8/10 UNSAFE) | HIGH | Open |
+| 9 | Systemd service has no sandboxing (9.8/10 UNSAFE) | HIGH | Fixed (7.0 MEDIUM) |
 | 10 | Config file permissions not enforced | MEDIUM | Open |
-| 11 | UMask not set — DB/files created world-readable | MEDIUM | Open |
-| 12 | `wl-copy` leaks clipboard content in `/proc/pid/cmdline` | HIGH | Open |
-| 13 | `NewClip` D-Bus signal broadcasts content to session bus | HIGH | Open |
-| 14 | No core dump protection — crash leaks clipboard history | MEDIUM | Open |
+| 11 | UMask not set — DB/files created world-readable | MEDIUM | Fixed |
+| 12 | `wl-copy` leaks clipboard content in `/proc/pid/cmdline` | HIGH | Fixed |
+| 13 | `NewClip` D-Bus signal broadcasts content to session bus | HIGH | Fixed |
+| 14 | No core dump protection — crash leaks clipboard history | MEDIUM | Fixed |
 | 15 | Sensitive data persists in process memory unscrubbed | MEDIUM | Open |
 | 16 | No mechanism to exclude sensitive content (passwords) | MEDIUM | Open |
 | 17 | Log injection via clipboard content | LOW | Open |

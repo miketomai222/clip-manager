@@ -10,5 +10,39 @@ Restart=on-failure
 RestartSec=3
 Environment=DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 PYTHONUNBUFFERED=1
 
+# --- Sandboxing ---
+
+# Prevent privilege escalation
+NoNewPrivileges=yes
+
+# Restrict filesystem
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=%h/.local/share/clip-manager
+BindReadOnlyPaths=%h/.config/clip-manager
+BindReadOnlyPaths=%h/.local/share/clip-manager/venv
+BindReadOnlyPaths=/usr
+
+# Lock down namespaces and personality
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+
+# Network: only UNIX sockets (D-Bus, X11)
+RestrictAddressFamilies=AF_UNIX
+
+# Only native syscall ABI
+SystemCallArchitectures=native
+
+# File creation mask — owner-only by default
+UMask=0077
+
+# Tmpfiles
+PrivateTmp=yes
+
+# Prevent core dumps leaking clipboard history
+LimitCORE=0
+
 [Install]
 WantedBy=default.target

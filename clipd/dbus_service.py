@@ -63,7 +63,9 @@ class ClipDaemonService(dbus.service.Object):
             return False
         try:
             proc = subprocess.run(
-                ["wl-copy", "--", entry.content],
+                ["wl-copy"],
+                input=entry.content,
+                text=True,
                 timeout=2,
             )
             return proc.returncode == 0
@@ -121,5 +123,13 @@ class ClipDaemonService(dbus.service.Object):
         pass
 
     def emit_new_clip(self, entry: ClipEntry):
-        """Emit the NewClip signal for a new entry."""
-        self.NewClip(json.dumps(_entry_to_dict(entry)))
+        """Emit the NewClip signal for a new entry.
+
+        Only emits ID and timestamp — content is deliberately excluded
+        because D-Bus signals are broadcast to all session bus listeners.
+        """
+        self.NewClip(json.dumps({
+            "id": entry.id,
+            "content_type": entry.content_type.value,
+            "timestamp": entry.timestamp,
+        }))
