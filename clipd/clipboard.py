@@ -7,7 +7,6 @@ change to read the content, eliminating polling and GNOME Shell flicker.
 
 import logging
 import os
-import select
 import subprocess
 from typing import Callable
 
@@ -17,7 +16,8 @@ from clip_common.types import ContentType
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL_MS = 2000  # fallback polling interval
+XFIXES_RETRY_INTERVAL_MS = 5000  # retry XFixes init every 5s
+XFIXES_MAX_RETRIES = 24  # stop retrying after ~2 minutes
 
 # Minimal environment for wl-paste to avoid GNOME Shell app tracking.
 _WLPASTE_ENV: dict[str, str] | None = None
@@ -36,7 +36,7 @@ def _get_wlpaste_env() -> dict[str, str]:
 
 
 def _init_xfixes():
-    """Set up XFixes clipboard monitoring. Returns (display, fd) or None."""
+    """Set up XFixes clipboard monitoring. Returns Display or None."""
     try:
         from Xlib import display
         from Xlib.ext import xfixes
@@ -57,15 +57,28 @@ def _init_xfixes():
         xfixes.select_selection_input(d, root, clipboard_atom, mask)
         d.flush()
 
-        logger.info("Using XFixes clipboard monitoring (event-driven, no polling)")
+        logger.info("Using XFixes clipboard monitoring (event-driven)")
         return d
     except ImportError:
-        logger.warning("python-xlib not installed, falling back to wl-paste polling")
+        logger.error("python-xlib not installed — clipboard monitoring unavailable")
         return None
     except Exception:
-        logger.warning("XFixes init failed, falling back to wl-paste polling",
+        logger.warning("XFixes init failed (XWayland may not be ready yet)",
                         exc_info=True)
         return None
+
+
+def _send_desktop_notification(summary: str, body: str) -> None:
+    """Send a desktop notification via notify-send (best-effort)."""
+    try:
+        subprocess.Popen(
+            ["notify-send", "--app-name=Clip Manager", summary, body],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        pass  # notify-send not installed
 
 
 class WlPasteWatcher:
@@ -73,29 +86,65 @@ class WlPasteWatcher:
 
     Uses X11 XFixes extension (via XWayland) for event-driven clipboard
     change notifications. Only reads clipboard content (via wl-paste)
-    when a change is actually detected. Falls back to periodic wl-paste
-    polling if XFixes is unavailable.
+    when a change is actually detected. If XFixes is unavailable at
+    startup, retries periodically until XWayland is ready.
     """
 
     def __init__(self, on_new_clip: Callable[[str, ContentType], None]):
         self._on_new_clip = on_new_clip
         self._source_id: int | None = None
+        self._retry_source_id: int | None = None
+        self._xfixes_retries = 0
         self._last_content: str | None = None
         self._xdisplay = _init_xfixes()
 
     def start(self):
         if self._xdisplay is not None:
-            fd = self._xdisplay.fileno()
-            self._source_id = GLib.io_add_watch(
-                fd, GLib.PRIORITY_DEFAULT,
-                GLib.IOCondition.IN, self._on_x11_event)
+            self._start_xfixes()
         else:
-            self._source_id = GLib.timeout_add(POLL_INTERVAL_MS, self._poll_fallback)
+            self._start_retrying()
+
+    def _start_xfixes(self):
+        """Begin event-driven XFixes monitoring."""
+        fd = self._xdisplay.fileno()
+        self._source_id = GLib.io_add_watch(
+            fd, GLib.PRIORITY_DEFAULT,
+            GLib.IOCondition.IN, self._on_x11_event)
+
+    def _start_retrying(self):
+        """Schedule periodic XFixes init retries."""
+        logger.warning("Clipboard monitoring inactive — retrying XFixes "
+                        "every %ds", XFIXES_RETRY_INTERVAL_MS // 1000)
+        self._retry_source_id = GLib.timeout_add(
+            XFIXES_RETRY_INTERVAL_MS, self._retry_xfixes)
+
+    def _retry_xfixes(self) -> bool:
+        """Periodically retry XFixes init."""
+        self._xfixes_retries += 1
+        self._xdisplay = _init_xfixes()
+        if self._xdisplay is not None:
+            self._retry_source_id = None
+            self._start_xfixes()
+            return False  # stop retrying
+        if self._xfixes_retries >= XFIXES_MAX_RETRIES:
+            logger.error("XFixes unavailable after %d retries — clipboard "
+                         "monitoring disabled. Check that XWayland is running "
+                         "and python-xlib is installed.", XFIXES_MAX_RETRIES)
+            _send_desktop_notification(
+                "Clip Manager",
+                "Clipboard monitoring failed — XWayland not available. "
+                "Try: systemctl --user restart clipd")
+            self._retry_source_id = None
+            return False  # stop retrying
+        return True  # keep retrying
 
     def stop(self):
         if self._source_id is not None:
             GLib.source_remove(self._source_id)
             self._source_id = None
+        if self._retry_source_id is not None:
+            GLib.source_remove(self._retry_source_id)
+            self._retry_source_id = None
         if self._xdisplay is not None:
             self._xdisplay.close()
             self._xdisplay = None
@@ -117,14 +166,6 @@ class WlPasteWatcher:
         if content is not None and content != self._last_content:
             self._last_content = content
             self._on_new_clip(content, ContentType.TEXT)
-
-    def _poll_fallback(self) -> bool:
-        """Fallback: poll wl-paste when XFixes is unavailable."""
-        try:
-            self._read_and_notify()
-        except Exception:
-            logger.exception("Clipboard poll error")
-        return True
 
 
 def _get_clipboard_text() -> str | None:
