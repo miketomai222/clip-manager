@@ -23,6 +23,10 @@ BindReadOnlyPaths=%h/.config/clip-manager
 BindReadOnlyPaths=%h/.local/share/clip-manager/venv
 BindReadOnlyPaths=/usr
 
+# Restrict /proc — daemon cannot see other processes' /proc entries
+ProtectProc=invisible
+ProcSubset=pid
+
 # Lock down namespaces and personality
 RestrictNamespaces=yes
 LockPersonality=yes
@@ -30,7 +34,11 @@ RestrictSUIDSGID=yes
 RestrictRealtime=yes
 
 # Network: only UNIX sockets (D-Bus, X11)
+# IPAddressDeny requires root and is redundant when RestrictAddressFamilies=AF_UNIX is set.
 RestrictAddressFamilies=AF_UNIX
+
+# Prevent W^X memory mappings (Python ctypes may conflict — remove if daemon fails to start)
+MemoryDenyWriteExecute=yes
 
 # Only native syscall ABI
 SystemCallArchitectures=native

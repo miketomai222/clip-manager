@@ -31,6 +31,29 @@ def _entry_to_dict(entry: ClipEntry) -> dict:
     }
 
 
+def _check_sender(sender: str | None) -> None:
+    """Raise DBusException if sender is not the current user.
+
+    Session bus access is already limited to the user's session, but this
+    adds defense-in-depth against compromised processes running as the same
+    user that attempt to read clipboard history or manipulate clips.
+    """
+    if sender is None:
+        return  # local call (e.g., unit tests) — allow
+    try:
+        bus = dbus.SessionBus()
+        sender_uid = bus.get_unix_user(sender)
+        if sender_uid != os.getuid():
+            raise dbus.DBusException(
+                "Access denied: sender UID mismatch",
+                name="org.clipmanager.AccessDenied",
+            )
+    except dbus.DBusException:
+        raise
+    except Exception:
+        logger.warning("Sender UID check failed, allowing call")
+
+
 class ClipDaemonService(dbus.service.Object):
     def __init__(self, db: ClipDatabase):
         self.db = db
@@ -41,23 +64,30 @@ class ClipDaemonService(dbus.service.Object):
         logger.info("D-Bus service registered: %s", DBUS_BUS_NAME)
 
     @dbus.service.method(DBUS_INTERFACE,
-                         in_signature="u", out_signature="s")
-    def GetRecent(self, limit):
+                         in_signature="u", out_signature="s",
+                         sender_keyword="sender")
+    def GetRecent(self, limit, sender=None):
         """Return recent clips as JSON array."""
-        entries = self.db.get_recent(int(limit))
+        _check_sender(sender)
+        limit = max(1, min(int(limit), 1000))
+        entries = self.db.get_recent(limit)
         return json.dumps([_entry_to_dict(e) for e in entries])
 
     @dbus.service.method(DBUS_INTERFACE,
-                         in_signature="s", out_signature="s")
-    def Search(self, query):
+                         in_signature="s", out_signature="s",
+                         sender_keyword="sender")
+    def Search(self, query, sender=None):
         """Search clips, return as JSON array."""
+        _check_sender(sender)
         entries = self.db.search(str(query))
         return json.dumps([_entry_to_dict(e) for e in entries])
 
     @dbus.service.method(DBUS_INTERFACE,
-                         in_signature="u", out_signature="b")
-    def SelectEntry(self, clip_id):
+                         in_signature="u", out_signature="b",
+                         sender_keyword="sender")
+    def SelectEntry(self, clip_id, sender=None):
         """Set clipboard to the content of the given clip entry."""
+        _check_sender(sender)
         entry = self.db.get_by_id(int(clip_id))
         if not entry:
             return False
@@ -74,19 +104,22 @@ class ClipDaemonService(dbus.service.Object):
             return False
 
     @dbus.service.method(DBUS_INTERFACE,
-                         in_signature="u", out_signature="b")
-    def PinEntry(self, clip_id):
+                         in_signature="u", out_signature="b",
+                         sender_keyword="sender")
+    def PinEntry(self, clip_id, sender=None):
         """Pin a clip entry."""
+        _check_sender(sender)
         entry = self.db.get_by_id(int(clip_id))
         if not entry:
             return False
-        self.db.pin(int(clip_id))
-        return True
+        return self.db.pin(int(clip_id))
 
     @dbus.service.method(DBUS_INTERFACE,
-                         in_signature="u", out_signature="b")
-    def UnpinEntry(self, clip_id):
+                         in_signature="u", out_signature="b",
+                         sender_keyword="sender")
+    def UnpinEntry(self, clip_id, sender=None):
         """Unpin a clip entry."""
+        _check_sender(sender)
         entry = self.db.get_by_id(int(clip_id))
         if not entry:
             return False
@@ -94,9 +127,11 @@ class ClipDaemonService(dbus.service.Object):
         return True
 
     @dbus.service.method(DBUS_INTERFACE,
-                         in_signature="", out_signature="b")
-    def ToggleUI(self):
+                         in_signature="", out_signature="b",
+                         sender_keyword="sender")
+    def ToggleUI(self, sender=None):
         """Toggle the UI popup open/closed."""
+        _check_sender(sender)
         if self._ui_is_running():
             logger.info("ToggleUI: closing UI (pid %d)", self._ui_proc.pid)
             self._ui_proc.terminate()

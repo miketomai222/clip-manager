@@ -7,10 +7,32 @@ import sys
 from clip_common import __version__
 from clip_common.types import ContentType
 
+# Control characters (except tab/LF/CR) that could be used for log injection
+# via clipboard content embedded in log messages.
+_CTRL_CHARS_TABLE = str.maketrans(
+    {i: None for i in range(32) if i not in (9, 10, 13)}
+)
+
+
+def _sanitize(text: str) -> str:
+    """Strip control characters from text before including it in log messages."""
+    return text.translate(_CTRL_CHARS_TABLE)
+
+
+class _SanitizeFilter(logging.Filter):
+    """Strip control characters from all log messages to prevent log injection."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = _sanitize(record.msg)
+        return True
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
+logging.getLogger().addFilter(_SanitizeFilter())
 logger = logging.getLogger("clipd")
 
 
@@ -51,7 +73,7 @@ def run_daemon():
     def on_new_clip(content: str, content_type: ContentType):
         entry = db.insert_clip(content, content_type)
         if entry:
-            logger.info("New clip stored: %s...", entry.content[:50])
+            logger.info("New clip stored: %s...", _sanitize(entry.content[:50]))
             db.delete_old(max_entries=config.max_history)
             service.emit_new_clip(entry)
 

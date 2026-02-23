@@ -10,9 +10,13 @@ from clip_common.types import ClipEntry, ContentType
 
 
 def _get_db_path() -> Path:
-    data_home = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
-    db_dir = Path(data_home) / "clip-manager"
-    db_dir.mkdir(parents=True, exist_ok=True)
+    old_umask = os.umask(0o077)
+    try:
+        data_home = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+        db_dir = Path(data_home) / "clip-manager"
+        db_dir.mkdir(parents=True, exist_ok=True)
+    finally:
+        os.umask(old_umask)
     return db_dir / "clips.db"
 
 
@@ -26,6 +30,7 @@ class ClipDatabase:
             db_path = _get_db_path()
         self.db_path = str(db_path)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        os.chmod(self.db_path, 0o600)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
 
@@ -127,9 +132,18 @@ class ClipDatabase:
         )
         self.conn.commit()
 
-    def pin(self, clip_id: int):
+    MAX_PINNED = 100  # hard cap to prevent storage abuse
+
+    def pin(self, clip_id: int) -> bool:
+        """Pin a clip. Returns False if the pinned quota is already reached."""
+        count = self.conn.execute(
+            "SELECT COUNT(*) FROM clips WHERE pinned = 1"
+        ).fetchone()[0]
+        if count >= self.MAX_PINNED:
+            return False
         self.conn.execute("UPDATE clips SET pinned = 1 WHERE id = ?", (clip_id,))
         self.conn.commit()
+        return True
 
     def unpin(self, clip_id: int):
         self.conn.execute("UPDATE clips SET pinned = 0 WHERE id = ?", (clip_id,))

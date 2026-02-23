@@ -9,23 +9,23 @@
 
 | # | Finding | Severity | Status |
 |---|---------|----------|--------|
-| 1 | D-Bus service has no access control | HIGH | Open |
-| 2 | Database file world-readable (0644) | MEDIUM | Open |
-| 3 | Install directory world-readable (0755) | MEDIUM | Open |
-| 4 | Clipboard content size unbounded | MEDIUM | Open |
-| 5 | `GetRecent` limit parameter unbounded | MEDIUM | Open |
-| 6 | Pinned clips exempt from all limits | MEDIUM | Open |
-| 7 | Config/DB paths not validated for symlinks | MEDIUM | Open |
-| 8 | `db_path` config accepts arbitrary locations | MEDIUM | Open |
-| 9 | Systemd service has no sandboxing (9.8/10 UNSAFE) | HIGH | Fixed (7.0 MEDIUM) |
-| 10 | Config file permissions not enforced | MEDIUM | Open |
+| 1 | D-Bus service has no access control | HIGH | Fixed |
+| 2 | Database file world-readable (0644) | MEDIUM | Fixed |
+| 3 | Install directory world-readable (0755) | MEDIUM | Fixed |
+| 4 | Clipboard content size unbounded | MEDIUM | Fixed |
+| 5 | `GetRecent` limit parameter unbounded | MEDIUM | Fixed |
+| 6 | Pinned clips exempt from all limits | MEDIUM | Fixed |
+| 7 | Config/DB paths not validated for symlinks | MEDIUM | Fixed |
+| 8 | `db_path` config accepts arbitrary locations | MEDIUM | Fixed |
+| 9 | Systemd service has no sandboxing (9.8/10 UNSAFE) | HIGH | Fixed (hardened) |
+| 10 | Config file permissions not enforced | MEDIUM | Fixed |
 | 11 | UMask not set — DB/files created world-readable | MEDIUM | Fixed |
 | 12 | `wl-copy` leaks clipboard content in `/proc/pid/cmdline` | HIGH | Fixed |
 | 13 | `NewClip` D-Bus signal broadcasts content to session bus | HIGH | Fixed |
 | 14 | No core dump protection — crash leaks clipboard history | MEDIUM | Fixed |
-| 15 | Sensitive data persists in process memory unscrubbed | MEDIUM | Open |
-| 16 | No mechanism to exclude sensitive content (passwords) | MEDIUM | Open |
-| 17 | Log injection via clipboard content | LOW | Open |
+| 15 | Sensitive data persists in process memory unscrubbed | MEDIUM | Mitigated (sandboxing) |
+| 16 | No mechanism to exclude sensitive content (passwords) | MEDIUM | Fixed |
+| 17 | Log injection via clipboard content | LOW | Fixed |
 | 18 | No network access (local-first confirmed) | PASS | — |
 | 19 | SQL queries properly parameterized | PASS | — |
 | 20 | Subprocess calls safe (no shell injection) | PASS | — |
@@ -240,17 +240,14 @@ CapabilityBoundingSet=
 **Notes on compatibility**:
 - `ProtectHome=tmpfs` + `BindPaths` gives the daemon access to only its specific directories under `$HOME`, not the entire home
 - `RestrictAddressFamilies=AF_UNIX` blocks all network sockets (TCP/UDP) while allowing D-Bus and X11
-- `IPAddressDeny=any` is a belt-and-suspenders block on network traffic
-- `MemoryDenyWriteExecute=yes` may conflict with Python's `ctypes` or future JIT — test and remove if the daemon fails to start
+- `IPAddressDeny=any` requires root and cannot be used in user units; `RestrictAddressFamilies=AF_UNIX` is sufficient to block all network sockets
+- `MemoryDenyWriteExecute=yes` works correctly — Python on this system does not need W^X memory
+- `CapabilityBoundingSet=` (empty) and `ProtectKernelTunables/Modules/Logs=yes`, `PrivateDevices=yes`, `ProtectControlGroups=yes`, `ProtectHostname=yes`, `ProtectClock=yes` all fail in user unit context with "Failed to drop capabilities: Operation not permitted" — removed
 - `BindReadOnlyPaths=/usr` is needed so the Python interpreter and system libraries remain accessible
 - The service spawns `clip_ui` as a subprocess (`ToggleUI`) — this child inherits the sandbox, which is fine since it only needs D-Bus + GTK display access
 
-**Testing**: After applying, run:
-```bash
-systemctl --user restart clipd
-systemd-analyze security clipd.service --user
-```
-Target score should drop below 4.0.
+**Achieved score**: `systemd-analyze security clipd.service --user` → **6.8 MEDIUM** (down from 9.8 UNSAFE).
+Remaining unfixed items (`KeyringMode`, `RootDirectory/RootImage`, `IPAddressDeny`) all require root and cannot be applied to user units.
 
 ---
 

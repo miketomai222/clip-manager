@@ -20,9 +20,10 @@ for cmd in wl-copy wl-paste wtype python3; do
     fi
 done
 
-# Create install directory
+# Create install directory (owner-only — contains the DB and clipboard history)
 echo "Installing to $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR"
+mkdir -p -m 0700 "$INSTALL_DIR"
+chmod 0700 "$INSTALL_DIR" 2>/dev/null || true  # fix existing installs
 
 # Copy project files
 for item in clip_common clipd clip_ui pyproject.toml requirements.txt; do

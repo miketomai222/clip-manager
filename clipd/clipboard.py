@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 XFIXES_RETRY_INTERVAL_MS = 5000  # retry XFixes init every 5s
 XFIXES_MAX_RETRIES = 24  # stop retrying after ~2 minutes
+MAX_TEXT_SIZE = 10 * 1024 * 1024  # 10 MB — reject oversized clipboard content
 
 # Minimal environment for wl-paste to avoid GNOME Shell app tracking.
 _WLPASTE_ENV: dict[str, str] | None = None
@@ -162,10 +163,38 @@ class WlPasteWatcher:
 
     def _read_and_notify(self):
         """Read clipboard content via wl-paste and notify if changed."""
+        if _is_sensitive_clipboard():
+            return
         content = _get_clipboard_text()
         if content is not None and content != self._last_content:
             self._last_content = content
             self._on_new_clip(content, ContentType.TEXT)
+
+
+def _is_sensitive_clipboard() -> bool:
+    """Return True if the clipboard contains content that should not be recorded.
+
+    Checks MIME type hints set by password managers (KeePassXC, Bitwarden, etc.).
+    KeePassXC and compatible tools set the 'x-kde-passwordManagerHint' MIME type
+    or a type containing 'password' to signal "do not record this".
+    """
+    try:
+        result = subprocess.run(
+            ["wl-paste", "--list-types"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            start_new_session=True,
+            env=_get_wlpaste_env(),
+        )
+        if result.returncode == 0 and result.stdout:
+            types_lower = result.stdout.lower()
+            if "password" in types_lower or "x-kde-passwordmanagerhint" in types_lower:
+                logger.info("Skipping clipboard — password manager hint detected")
+                return True
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return False
 
 
 def _get_clipboard_text() -> str | None:
@@ -180,6 +209,9 @@ def _get_clipboard_text() -> str | None:
             env=_get_wlpaste_env(),
         )
         if result.returncode == 0 and result.stdout:
+            if len(result.stdout) > MAX_TEXT_SIZE:
+                logger.warning("Clipboard text exceeds 10 MB limit, skipping")
+                return None
             return result.stdout
     except FileNotFoundError:
         logger.error("wl-paste not found. Install wl-clipboard.")

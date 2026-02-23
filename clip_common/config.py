@@ -44,20 +44,54 @@ def load_config() -> Config:
     config_path = _get_config_path()
     config = Config()
 
-    if config_path.exists():
-        try:
-            with open(config_path, "rb") as f:
-                data = tomllib.load(f)
-            if "max_history" in data:
-                config.max_history = int(data["max_history"])
-            if "hotkey" in data:
-                config.hotkey = str(data["hotkey"])
-            if "db_path" in data:
-                config.db_path = os.path.expanduser(str(data["db_path"]))
-            if "max_image_size" in data:
-                config.max_image_size = int(data["max_image_size"])
-            logger.info("Loaded config from %s", config_path)
-        except Exception:
-            logger.exception("Failed to load config from %s, using defaults", config_path)
+    if not config_path.exists():
+        return config
+
+    # Reject symlinks — a symlink here could redirect to arbitrary files.
+    if config_path.is_symlink():
+        logger.error("Config file is a symlink, ignoring: %s", config_path)
+        return config
+
+    # Reject files not owned by the current user.
+    stat = config_path.stat()
+    if stat.st_uid != os.getuid():
+        logger.error("Config file not owned by current user, ignoring: %s", config_path)
+        return config
+
+    # Warn on world-readable config (may reveal db_path or other settings).
+    if stat.st_mode & 0o077:
+        logger.warning(
+            "Config file has permissive mode %o, recommend 0600: %s",
+            stat.st_mode & 0o777, config_path,
+        )
+
+    try:
+        with open(config_path, "rb") as f:
+            data = tomllib.load(f)
+
+        if "max_history" in data:
+            # Clamp to a sane range — 0 would disable pruning, very large values waste disk.
+            config.max_history = max(10, min(int(data["max_history"]), 10_000))
+
+        if "hotkey" in data:
+            config.hotkey = str(data["hotkey"])
+
+        if "db_path" in data:
+            db_path = Path(os.path.expanduser(str(data["db_path"])))
+            allowed_parent = Path.home() / ".local" / "share" / "clip-manager"
+            if db_path.parent == allowed_parent:
+                config.db_path = str(db_path)
+            else:
+                logger.error(
+                    "db_path must be directly under %s, ignoring: %s",
+                    allowed_parent, db_path,
+                )
+
+        if "max_image_size" in data:
+            config.max_image_size = max(1024, min(int(data["max_image_size"]), 100 * 1024 * 1024))
+
+        logger.info("Loaded config from %s", config_path)
+    except Exception:
+        logger.exception("Failed to load config from %s, using defaults", config_path)
 
     return config
