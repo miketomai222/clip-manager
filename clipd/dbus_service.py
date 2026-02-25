@@ -58,10 +58,14 @@ class ClipDaemonService(dbus.service.Object):
     def __init__(self, db: ClipDatabase):
         self.db = db
         self._ui_proc: subprocess.Popen | None = None
+        self._watcher = None
         bus = dbus.SessionBus()
         bus_name = dbus.service.BusName(DBUS_BUS_NAME, bus)
         super().__init__(bus_name, DBUS_OBJECT_PATH)
         logger.info("D-Bus service registered: %s", DBUS_BUS_NAME)
+
+    def set_watcher(self, watcher) -> None:
+        self._watcher = watcher
 
     @dbus.service.method(DBUS_INTERFACE,
                          in_signature="u", out_signature="s",
@@ -88,6 +92,8 @@ class ClipDaemonService(dbus.service.Object):
     def SelectEntry(self, clip_id, sender=None):
         """Set clipboard to the content of the given clip entry."""
         _check_sender(sender)
+        if self._watcher:
+            self._watcher.try_reconnect()
         entry = self.db.get_by_id(int(clip_id))
         if not entry:
             return False
@@ -138,6 +144,8 @@ class ClipDaemonService(dbus.service.Object):
             self._ui_proc = None
             return False  # UI is now closed
         else:
+            if self._watcher:
+                self._watcher.try_reconnect()
             logger.info("ToggleUI: opening UI")
             self._ui_proc = subprocess.Popen(
                 [sys.executable, "-m", "clip_ui"],

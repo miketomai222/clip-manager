@@ -17,7 +17,7 @@ from clip_common.types import ContentType
 logger = logging.getLogger(__name__)
 
 XFIXES_RETRY_INTERVAL_MS = 5000  # retry XFixes init every 5s
-XFIXES_MAX_RETRIES = 24  # stop retrying after ~2 minutes
+XFIXES_MAX_RETRIES = 24  # give up timed retries after ~2 minutes
 MAX_TEXT_SIZE = 10 * 1024 * 1024  # 10 MB — reject oversized clipboard content
 
 # Minimal environment for wl-paste to avoid GNOME Shell app tracking.
@@ -36,8 +36,34 @@ def _get_wlpaste_env() -> dict[str, str]:
     return _WLPASTE_ENV
 
 
+def _sync_xauthority() -> None:
+    """Fetch XAUTHORITY from the systemd user manager and inject it into
+    the current process environment if not already set.
+
+    The service may start before GNOME exports XAUTHORITY via
+    dbus-update-activation-environment, so the env var might be missing
+    at launch even though it's available in the user manager shortly after.
+    """
+    if os.environ.get("XAUTHORITY"):
+        return
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show-environment"],
+            capture_output=True, text=True, timeout=2,
+        )
+        for line in result.stdout.splitlines():
+            if line.startswith("XAUTHORITY="):
+                os.environ["XAUTHORITY"] = line[len("XAUTHORITY="):]
+                logger.info("Fetched XAUTHORITY from systemd user manager: %s",
+                            os.environ["XAUTHORITY"])
+                break
+    except Exception:
+        pass  # best-effort; Xlib will fail and we'll retry
+
+
 def _init_xfixes():
     """Set up XFixes clipboard monitoring. Returns Display or None."""
+    _sync_xauthority()
     try:
         from Xlib import display
         from Xlib.ext import xfixes
@@ -96,6 +122,7 @@ class WlPasteWatcher:
         self._source_id: int | None = None
         self._retry_source_id: int | None = None
         self._xfixes_retries = 0
+        self._failed = False
         self._last_content: str | None = None
         self._xdisplay = _init_xfixes()
 
@@ -129,15 +156,35 @@ class WlPasteWatcher:
             return False  # stop retrying
         if self._xfixes_retries >= XFIXES_MAX_RETRIES:
             logger.error("XFixes unavailable after %d retries — clipboard "
-                         "monitoring disabled. Check that XWayland is running "
-                         "and python-xlib is installed.", XFIXES_MAX_RETRIES)
+                         "monitoring disabled. Will retry on UI open.",
+                         XFIXES_MAX_RETRIES)
             _send_desktop_notification(
                 "Clip Manager",
                 "Clipboard monitoring failed — XWayland not available. "
-                "Try: systemctl --user restart clipd")
+                "Will retry when you open clipboard history.")
+            self._failed = True
             self._retry_source_id = None
-            return False  # stop retrying
+            return False  # stop timed retrying
         return True  # keep retrying
+
+    def try_reconnect(self) -> bool:
+        """Attempt one XFixes reconnect if timed retries previously gave up.
+
+        Called on UI open or clipboard selection so monitoring can recover
+        without requiring a full daemon restart.
+        Returns True if monitoring is now active.
+        """
+        if self._xdisplay is not None:
+            return True  # already active
+        if not self._failed:
+            return False  # still in the timed retry phase
+        self._xdisplay = _init_xfixes()
+        if self._xdisplay is not None:
+            self._failed = False
+            self._start_xfixes()
+            logger.info("XFixes reconnected on demand")
+            return True
+        return False
 
     def stop(self):
         if self._source_id is not None:

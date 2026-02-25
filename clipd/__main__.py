@@ -78,6 +78,7 @@ def run_daemon():
             service.emit_new_clip(entry)
 
     watcher = WlPasteWatcher(on_new_clip=on_new_clip)
+    service.set_watcher(watcher)
 
     logger.info("Starting clip-manager daemon v%s", __version__)
     logger.info("Config: max_history=%d, db=%s", config.max_history, config.db_path)
