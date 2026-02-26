@@ -108,6 +108,7 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         self._search_entry.set_margin_bottom(4)
         self._search_entry.connect("search-changed", self._on_search_changed)
         self._search_entry.connect("activate", self._on_search_activate)
+        self._search_entry.connect("stop-search", self._on_stop_search)
         vbox.append(self._search_entry)
 
         # Scrolled window for clip list
@@ -237,6 +238,11 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         selected = self._listbox.get_selected_row()
         if selected:
             self._on_row_activated(self._listbox, selected)
+
+    def _on_stop_search(self, entry):
+        """Handle Escape in the search entry — close the window."""
+        self._closed = True
+        self.close()
 
     def _do_search(self, query: str):
         self._search_timeout_id = None

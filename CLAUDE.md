@@ -48,6 +48,10 @@ bash tests/stage3.sh
 bash install.sh
 ```
 
+## Deployment
+
+After making any code changes, always run `bash install.sh` to apply them to the running service. This copies the source to `~/.local/share/clip-manager/`, reinstalls the package into the deployed venv, and restarts the `clipd` systemd service.
+
 ## Architecture
 
 Three Python packages communicating over D-Bus:
