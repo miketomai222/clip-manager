@@ -140,8 +140,9 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         # Load clips
         GLib.idle_add(self._load_clips)
 
-        # Focus the search entry
-        GLib.idle_add(self._search_entry.grab_focus)
+        # Focus the search entry (wrap in lambda: grab_focus returns True, which
+        # would cause idle_add to re-schedule it on every main loop iteration)
+        GLib.idle_add(lambda: self._search_entry.grab_focus() and False)
 
     def _load_css(self):
         css = b"""
