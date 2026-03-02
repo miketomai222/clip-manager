@@ -108,7 +108,7 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         self._search_entry.set_margin_bottom(4)
         self._search_entry.connect("search-changed", self._on_search_changed)
         self._search_entry.connect("activate", self._on_search_activate)
-        self._search_entry.connect("stop-search", self._on_stop_search)
+        # stop-search is dead code — key controller (CAPTURE phase) consumes Escape first
         vbox.append(self._search_entry)
 
         # Scrolled window for clip list
@@ -125,6 +125,7 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
 
         # Key controller for keyboard navigation
         key_controller = Gtk.EventControllerKey()
+        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", self._on_key_pressed)
         self.add_controller(key_controller)
 
@@ -239,11 +240,6 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         if selected:
             self._on_row_activated(self._listbox, selected)
 
-    def _on_stop_search(self, entry):
-        """Handle Escape in the search entry — close the window."""
-        self._closed = True
-        self.close()
-
     def _do_search(self, query: str):
         self._search_timeout_id = None
         self._search_clips(query)
@@ -257,18 +253,24 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         if isinstance(clip_row, ClipRow):
             self._select_clip(clip_row.clip_data)
 
-    def _select_clip(self, clip_data: dict):
-        """Select a clip: set clipboard and paste."""
+    def _close_window(self):
+        """Mark the window closed and destroy it."""
+        self._closed = True
+        self.close()
+
+    def _copy_clip_to_clipboard(self, clip_id: int):
+        """Tell the daemon to put clip_id on the clipboard."""
         daemon = self._get_daemon()
         if daemon:
             try:
-                daemon.SelectEntry(dbus.UInt32(clip_data["id"]))
+                daemon.SelectEntry(dbus.UInt32(clip_id))
             except Exception:
                 logger.exception("Failed to select clip")
 
-        # Hide window first, then paste
-        self._closed = True
-        self.close()
+    def _select_clip(self, clip_data: dict):
+        """Select a clip: set clipboard and paste."""
+        self._copy_clip_to_clipboard(clip_data["id"])
+        self._close_window()
 
         # Small delay to let focus return, then simulate Ctrl+V
         GLib.timeout_add(150, self._simulate_paste)
@@ -288,8 +290,16 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
     def _on_key_pressed(self, controller, keyval, keycode, state):
         """Handle keyboard shortcuts."""
         if keyval == Gdk.KEY_Escape:
-            self._closed = True
-            self.close()
+            self._close_window()
+            return True
+
+        if keyval == Gdk.KEY_c and state & Gdk.ModifierType.CONTROL_MASK:
+            selected = self._listbox.get_selected_row()
+            if selected:
+                clip_row = selected.get_child()
+                if isinstance(clip_row, ClipRow):
+                    self._copy_clip_to_clipboard(clip_row.clip_data["id"])
+            self._close_window()
             return True
 
         # Arrow keys move selection in list
@@ -333,6 +343,5 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         if self._closed:
             return False
         if not self.is_active():
-            self._closed = True
-            self.close()
+            self._close_window()
         return False
