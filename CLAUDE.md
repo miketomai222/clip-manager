@@ -75,9 +75,9 @@ clipd/              clip_ui/
 - DB file: `~/.local/share/clip-manager/clips.db`
 - Config: `~/.config/clip-manager/config.toml` (optional, env override: `CLIP_MANAGER_CONFIG`)
 - systemd service: `~/.config/systemd/user/clipd.service`
-- Design doc: `plan/design.md`
-- Implementation plan: `plan/implementation.md` (tracks stage progress)
-- Stage specs: `plan/stage[1-8]-*.md`
+- Design doc: `plan/01-design.md`
+- Implementation plan: `plan/02-implementation.md` (tracks stage progress)
+- Stage specs: `plan/03-stage1-*.md` … `plan/11-stage9-*.md`
 
 ## Configuration
 
