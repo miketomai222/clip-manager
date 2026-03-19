@@ -111,6 +111,64 @@ class TestSearch:
         results = db.search("zebra")
         assert len(results) == 0
 
+    def test_substring_match(self, db):
+        db.insert_clip("foobar baz")
+        db.insert_clip("no match here")
+
+        results = db.search("foo")
+        assert len(results) == 1
+        assert results[0].content == "foobar baz"
+
+    def test_special_fts5_chars_do_not_crash(self, db):
+        db.insert_clip("hello world")
+
+        results = db.search('hello "world')
+        assert isinstance(results, list)
+
+    def test_image_clips_excluded_from_search(self, db):
+        db.insert_clip("searchable text")
+        db.insert_clip("image data here", ContentType.IMAGE)
+
+        results = db.search("image")
+        assert len(results) == 0
+
+    def test_search_capped_at_200_results(self, db):
+        for i in range(205):
+            db.insert_clip(f"clip number {i}")
+
+        results = db.search("clip")
+        assert len(results) == 200
+
+    def test_pinned_clip_ranks_above_unpinned(self, db):
+        pinned = db.insert_clip("alpha beta gamma")
+        db.pin(pinned.id)
+        db.insert_clip("alpha beta gamma delta")
+
+        results = db.search("alpha")
+        assert results[0].id == pinned.id
+
+
+class TestMigration:
+    def test_old_non_trigram_db_migrates_and_retains_text_clips(self, tmp_path):
+        db_path = tmp_path / "old.db"
+
+        old_db = ClipDatabase(db_path=db_path)
+        old_db.insert_clip("foobar existing clip")
+        old_db.conn.execute("DROP TABLE IF EXISTS clips_fts")
+        old_db.conn.execute(
+            "CREATE VIRTUAL TABLE clips_fts USING fts5(content, content='clips', content_rowid='id')"
+        )
+        old_db.conn.execute("INSERT INTO clips_fts(clips_fts) VALUES('rebuild')")
+        old_db.conn.commit()
+        old_db.close()
+
+        migrated_db = ClipDatabase(db_path=db_path)
+        results = migrated_db.search("foo")
+        migrated_db.close()
+
+        assert len(results) == 1
+        assert results[0].content == "foobar existing clip"
+
 
 class TestPinUnpin:
     def test_pin_and_unpin(self, db):

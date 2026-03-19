@@ -48,24 +48,40 @@ class ClipDatabase:
             CREATE INDEX IF NOT EXISTS idx_clips_timestamp ON clips(timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(hash);
         """)
-        # Create FTS5 table if it doesn't exist
-        try:
-            self.conn.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS clips_fts
-                USING fts5(content, content='clips', content_rowid='id');
-            """)
-        except sqlite3.OperationalError:
-            pass  # FTS5 not available, search will fall back to LIKE
-
-        # Triggers to keep FTS in sync
+        self._migrate_fts()
         self.conn.executescript("""
-            CREATE TRIGGER IF NOT EXISTS clips_ai AFTER INSERT ON clips BEGIN
+            CREATE TRIGGER IF NOT EXISTS clips_ai AFTER INSERT ON clips
+            WHEN new.content_type = 'text'
+            BEGIN
                 INSERT INTO clips_fts(rowid, content) VALUES (new.id, new.content);
             END;
-            CREATE TRIGGER IF NOT EXISTS clips_ad AFTER DELETE ON clips BEGIN
+            CREATE TRIGGER IF NOT EXISTS clips_ad AFTER DELETE ON clips
+            WHEN old.content_type = 'text'
+            BEGIN
                 INSERT INTO clips_fts(clips_fts, rowid, content) VALUES('delete', old.id, old.content);
             END;
         """)
+        self.conn.commit()
+
+    def _migrate_fts(self):
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='clips_fts'"
+        ).fetchone()
+        if row is not None and row[0] and "trigram" in row[0]:
+            return
+        self.conn.executescript("""
+            DROP TABLE IF EXISTS clips_fts;
+            DROP TRIGGER IF EXISTS clips_ai;
+            DROP TRIGGER IF EXISTS clips_ad;
+        """)
+        try:
+            self.conn.execute("""
+                CREATE VIRTUAL TABLE clips_fts
+                USING fts5(content, content='clips', content_rowid='id', tokenize='trigram')
+            """)
+            self.conn.execute("INSERT INTO clips_fts(clips_fts) VALUES('rebuild')")
+        except sqlite3.OperationalError:
+            pass  # FTS5 not available, search will fall back to LIKE
         self.conn.commit()
 
     def insert_clip(self, content: str, content_type: ContentType = ContentType.TEXT) -> ClipEntry | None:
@@ -103,19 +119,19 @@ class ClipDatabase:
         return [self._row_to_entry(r) for r in rows]
 
     def search(self, query: str) -> list[ClipEntry]:
-        """Search clips using FTS5, falling back to LIKE."""
+        """Search clips using FTS5 trigram index, falling back to LIKE."""
         try:
             rows = self.conn.execute(
                 """SELECT clips.* FROM clips_fts
                    JOIN clips ON clips.id = clips_fts.rowid
                    WHERE clips_fts MATCH ?
-                   ORDER BY clips.timestamp DESC""",
+                   ORDER BY (clips_fts.rank - clips.pinned), clips.timestamp DESC
+                   LIMIT 200""",
                 (query,),
             ).fetchall()
         except sqlite3.OperationalError:
-            # FTS not available, fall back to LIKE
             rows = self.conn.execute(
-                "SELECT * FROM clips WHERE content LIKE ? ORDER BY timestamp DESC",
+                "SELECT * FROM clips WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 200",
                 (f"%{query}%",),
             ).fetchall()
         return [self._row_to_entry(r) for r in rows]

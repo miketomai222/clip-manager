@@ -27,49 +27,38 @@ ORDER BY clips.timestamp DESC
 
 7. **No result limit** — `search()` returns all matches; a large history could return thousands of rows on common words like "the".
 
-## Improvement Directions
+## Chosen Approach
 
-### 1. Sanitize / wrap the query before passing to MATCH
+**FTS5 trigram tokenizer** (`tokenize="trigram"`) as a drop-in replacement for the default tokenizer. This resolves the core issues (no substring match, special-char crashes, LIKE fallback) in one schema change rather than layering query-sanitization heuristics on top of a broken foundation.
 
-Escape or quote the user's raw input so FTS5 never throws. Options:
-- Wrap in double-quotes for a phrase search: `"user query"` — exact phrase, safe from special chars.
-- Tokenize the input and append `*` to the last token for prefix matching: `hello world*`.
-- Strip characters FTS5 treats as operators before building the MATCH expression.
+Rejected alternatives:
+- **Query sanitization** — would fix crashes but not the substring/prefix gap; still need a separate strategy for short queries.
+- **Hybrid short/long query routing** — adds branching complexity; trigram handles all query lengths uniformly.
+- **Fuzzy / Levenshtein matching** — not needed for a clipboard manager; users know what they copied.
 
-Trade-off: phrase-only kills multi-word AND matching; tokenized prefix is more complex but more useful.
+## Decisions
 
-### 2. Rank by relevance using FTS5's built-in `rank`
+1. **Keep live-as-you-type** (150ms debounce already in place). Favors fast, predictable matching over fuzzy/aggressive approaches.
 
-FTS5 exposes a `rank` column (BM25-based). Replace `ORDER BY timestamp DESC` with a composite:
+2. **Adopt FTS5 trigram tokenizer** (`tokenize="trigram"`). This single change resolves problems 2, 3, 4, and 5 from above:
+   - Substring and prefix matching work natively — no query sanitization needed.
+   - No special-character `OperationalError` — trigram tokenizer treats input as literal substrings.
+   - Eliminates the LIKE fallback for normal operation. Keep LIKE only as a compile-time safety net if FTS5 is unavailable.
+   - Trade-off (larger index, slower inserts) is negligible at 500–10,000 clips.
 
-```sql
-ORDER BY rank, clips.timestamp DESC
-```
+3. **Order by `rank` then `timestamp DESC`**. Use FTS5's built-in BM25 `rank` as primary sort key, recency as tiebreaker. Boost pinned clips with a small constant (`rank - 1.0` for pinned rows) — simple, no extra columns.
 
-Or weight recency vs. relevance with a formula (e.g., boost pinned clips).
+4. **Cap results at 200** (`LIMIT 200` in `search()`). Not configurable — the UI list never needs more than this.
 
-### 3. Hybrid substring + FTS5 for short queries
+5. **Exclude image clips from FTS index**. Change the `clips_ai` trigger to only insert rows where `new.content_type = 'text'`. Images are not text-searchable; binary content in the trigram index wastes space. Image clips remain visible in `get_recent()`.
 
-Short queries (≤3 chars) benefit more from substring matching than token matching. Strategy:
-- If `len(query) <= 3`: use `LIKE %query%` with an index-friendly approach, or FTS5 prefix (`query*`).
-- If `len(query) > 3`: use FTS5 phrase/token search with rank.
+6. **No user-visible fallback indicator**. With trigram, the fallback is a last-resort for systems without FTS5 — not a normal path. No UI change needed.
 
-### 4. Skip non-text content in FTS index
+## Implementation Checklist
 
-Only index `content_type = 'text'` rows. Images produce meaningless tokens and bloat the FTS table. This requires a filtered trigger or a `WHERE` clause on inserts.
-
-### 5. Cap result count
-
-Add `LIMIT 200` (or config-driven) to `search()` so the UI never gets flooded.
-
-### 6. Consider trigram indexing as an alternative
-
-SQLite's FTS5 trigram tokenizer (`tokenize="trigram"`) supports substring and case-insensitive search natively, fixes the prefix/substring gap, and still uses an index. Trade-off: larger index size (~3× vs. standard tokenizer), slower inserts.
-
-## Open Questions
-
-- Should search be live-as-you-type (current) or triggered on Enter? Affects how aggressive prefix/fuzzy matching should be.
-- Should pinned clips rank higher than recency/relevance?
-- Is there a user-visible indicator when FTS fallback is active?
-- What is the realistic history size? At 500 clips (default max), O(n) LIKE is probably fast enough; at 5000+ it becomes noticeable.
-- Should image clips be searchable by metadata (timestamp, source app) rather than content?
+- [x] Drop and recreate `clips_fts` with `tokenize="trigram"` — `_migrate_fts()` in `clipd/db.py` detects old tokenizer via `sqlite_master`, drops and recreates, runs `rebuild`.
+- [x] Update `clips_ai` trigger: add `WHEN new.content_type = 'text'` guard.
+- [x] Update `clips_ad` trigger: add matching `WHEN old.content_type = 'text'` guard.
+- [x] Rewrite `search()` query: change ORDER BY, add LIMIT 200.
+- [x] Add pinned boost to ORDER BY: `ORDER BY (clips_fts.rank - clips.pinned), clips.timestamp DESC`.
+- [x] Write/update tests in `tests/test_db.py`: substring match, special chars, image exclusion, result cap, pinned ranking, migration.
