@@ -46,7 +46,7 @@ Rejected alternatives:
    - Eliminates the LIKE fallback for normal operation. Keep LIKE only as a compile-time safety net if FTS5 is unavailable.
    - Trade-off (larger index, slower inserts) is negligible at 500–10,000 clips.
 
-3. **Order by `rank` then `timestamp DESC`**. Use FTS5's built-in BM25 `rank` as primary sort key, recency as tiebreaker. Boost pinned clips with a small constant (`rank - 1.0` for pinned rows) — simple, no extra columns.
+3. **Order by `Rejected alternatives:BM25 `rank` as primary sort key, recency as tiebreaker. Boost pinned clips with a small constant (`rank - 1.0` for pinned rows) — simple, no extra columns.
 
 4. **Cap results at 200** (`LIMIT 200` in `search()`). Not configurable — the UI list never needs more than this.
 
