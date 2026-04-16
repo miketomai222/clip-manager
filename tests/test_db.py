@@ -132,6 +132,23 @@ class TestSearch:
         results = db.search("image")
         assert len(results) == 0
 
+    def test_html_clips_indexed_for_search(self, db):
+        html = '<p>Check out <a href="https://example.com">this link</a> for details.</p>'
+        db.insert_clip(html, ContentType.HTML)
+
+        results = db.search("details")
+        assert len(results) == 1
+        assert results[0].content_type == ContentType.HTML
+
+    def test_html_clip_searchable_by_anchor_text(self, db):
+        html = '<a href="https://example.com">click here</a>'
+        db.insert_clip(html, ContentType.HTML)
+        db.insert_clip("unrelated plain text")
+
+        results = db.search("click")
+        assert len(results) == 1
+        assert results[0].content_type == ContentType.HTML
+
     def test_search_capped_at_200_results(self, db):
         for i in range(205):
             db.insert_clip(f"clip number {i}")

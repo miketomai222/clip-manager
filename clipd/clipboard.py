@@ -210,21 +210,22 @@ class WlPasteWatcher:
 
     def _read_and_notify(self):
         """Read clipboard content via wl-paste and notify if changed."""
-        if _is_sensitive_clipboard():
+        types = _get_clipboard_types()
+        if _is_sensitive_in_types(types):
             return
-        content = _get_clipboard_text()
+        if "text/html" in types:
+            content = _get_clipboard_html()
+            content_type = ContentType.HTML
+        else:
+            content = _get_clipboard_text()
+            content_type = ContentType.TEXT
         if content is not None and content != self._last_content:
             self._last_content = content
-            self._on_new_clip(content, ContentType.TEXT)
+            self._on_new_clip(content, content_type)
 
 
-def _is_sensitive_clipboard() -> bool:
-    """Return True if the clipboard contains content that should not be recorded.
-
-    Checks MIME type hints set by password managers (KeePassXC, Bitwarden, etc.).
-    KeePassXC and compatible tools set the 'x-kde-passwordManagerHint' MIME type
-    or a type containing 'password' to signal "do not record this".
-    """
+def _get_clipboard_types() -> list[str]:
+    """Return the list of MIME types currently on the clipboard."""
     try:
         result = subprocess.run(
             ["wl-paste", "--list-types"],
@@ -235,13 +236,42 @@ def _is_sensitive_clipboard() -> bool:
             env=_get_wlpaste_env(),
         )
         if result.returncode == 0 and result.stdout:
-            types_lower = result.stdout.lower()
-            if "password" in types_lower or "x-kde-passwordmanagerhint" in types_lower:
-                logger.info("Skipping clipboard — password manager hint detected")
-                return True
+            return result.stdout.strip().splitlines()
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
+    return []
+
+
+def _is_sensitive_in_types(types: list[str]) -> bool:
+    """Return True if the type list contains a password-manager hint."""
+    types_lower = "\n".join(types).lower()
+    if "password" in types_lower or "x-kde-passwordmanagerhint" in types_lower:
+        logger.info("Skipping clipboard — password manager hint detected")
+        return True
     return False
+
+
+def _get_clipboard_html() -> str | None:
+    """Get the current clipboard HTML content using wl-paste."""
+    try:
+        result = subprocess.run(
+            ["wl-paste", "--no-newline", "--type", "text/html"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            start_new_session=True,
+            env=_get_wlpaste_env(),
+        )
+        if result.returncode == 0 and result.stdout:
+            if len(result.stdout) > MAX_TEXT_SIZE:
+                logger.warning("Clipboard HTML exceeds 10 MB limit, skipping")
+                return None
+            return result.stdout
+    except FileNotFoundError:
+        logger.error("wl-paste not found. Install wl-clipboard.")
+    except subprocess.TimeoutExpired:
+        logger.warning("wl-paste timed out after 2s")
+    return None
 
 
 def _get_clipboard_text() -> str | None:

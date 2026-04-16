@@ -20,6 +20,10 @@ for cmd in wl-copy wl-paste wtype python3; do
     fi
 done
 
+# Stop the service before updating so the DB is not locked during migration
+echo "Stopping daemon (if running)..."
+systemctl --user stop clipd 2>/dev/null || true
+
 # Create install directory (owner-only — contains the DB and clipboard history)
 echo "Installing to $INSTALL_DIR..."
 mkdir -p -m 0700 "$INSTALL_DIR"
@@ -36,6 +40,15 @@ if [ ! -d "$INSTALL_DIR/venv" ]; then
     python3 -m venv "$INSTALL_DIR/venv" --system-site-packages
 fi
 "$INSTALL_DIR/venv/bin/pip" install -q "$INSTALL_DIR"
+
+# Run DB migrations (ClipDatabase.__init__ applies schema changes on every open)
+echo "Running DB migrations..."
+"$INSTALL_DIR/venv/bin/python3" -c "
+from clipd.db import ClipDatabase
+db = ClipDatabase()
+db.close()
+print('  Migrations applied.')
+"
 
 # Install systemd service
 echo "Installing systemd service..."
@@ -70,7 +83,7 @@ gsettings set "$SCHEMA:$DCONF_PATH" name "Clip Manager" 2>/dev/null || true
 gsettings set "$SCHEMA:$DCONF_PATH" command "gdbus call --session --dest org.clipmanager --object-path /org/clipmanager/Daemon --method org.clipmanager.Daemon.ToggleUI" 2>/dev/null || true
 gsettings set "$SCHEMA:$DCONF_PATH" binding "<Ctrl>grave" 2>/dev/null || true
 
-# Start the service
+# Start the service (stopped above; start is always needed here)
 echo "Starting daemon..."
 systemctl --user start clipd
 

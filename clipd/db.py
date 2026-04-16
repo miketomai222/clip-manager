@@ -50,13 +50,15 @@ class ClipDatabase:
         """)
         self._migrate_fts()
         self.conn.executescript("""
-            CREATE TRIGGER IF NOT EXISTS clips_ai AFTER INSERT ON clips
-            WHEN new.content_type = 'text'
+            DROP TRIGGER IF EXISTS clips_ai;
+            DROP TRIGGER IF EXISTS clips_ad;
+            CREATE TRIGGER clips_ai AFTER INSERT ON clips
+            WHEN new.content_type IN ('text', 'html')
             BEGIN
                 INSERT INTO clips_fts(rowid, content) VALUES (new.id, new.content);
             END;
-            CREATE TRIGGER IF NOT EXISTS clips_ad AFTER DELETE ON clips
-            WHEN old.content_type = 'text'
+            CREATE TRIGGER clips_ad AFTER DELETE ON clips
+            WHEN old.content_type IN ('text', 'html')
             BEGIN
                 INSERT INTO clips_fts(clips_fts, rowid, content) VALUES('delete', old.id, old.content);
             END;

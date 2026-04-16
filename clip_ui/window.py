@@ -12,6 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, Gtk, Pango
 
+from clip_common.html_utils import strip_html
 from clip_common.types import DBUS_BUS_NAME, DBUS_INTERFACE, DBUS_OBJECT_PATH
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,8 @@ class ClipRow(Gtk.Box):
 
         # Content preview
         content = clip_data.get("content", "")
+        if clip_data.get("content_type") == "html":
+            content = strip_html(content)
         # Truncate for display
         preview = content[:200].replace("\n", " ").strip()
         if len(content) > 200:
@@ -259,18 +262,37 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
         self._closed = True
         self.close()
 
-    def _copy_clip_to_clipboard(self, clip_id: int):
-        """Tell the daemon to put clip_id on the clipboard."""
-        daemon = self._get_daemon()
-        if daemon:
-            try:
-                daemon.SelectEntry(dbus.UInt32(clip_id))
-            except Exception:
-                logger.exception("Failed to select clip")
+    def _set_clipboard(self, clip_data: dict):
+        """Set the clipboard to the given clip's content."""
+        if clip_data.get("content_type") == "html":
+            html_content = clip_data.get("content", "")
+            plain_text = strip_html(html_content)
+            self._set_html_clipboard(html_content, plain_text)
+        else:
+            daemon = self._get_daemon()
+            if daemon:
+                try:
+                    daemon.SelectEntry(dbus.UInt32(clip_data["id"]))
+                except Exception:
+                    logger.exception("Failed to select clip")
+
+    def _set_html_clipboard(self, html_content: str, plain_text: str):
+        """Set the GDK clipboard to offer both text/html and text/plain."""
+        try:
+            html_bytes = GLib.Bytes.new(html_content.encode("utf-8"))
+            text_bytes = GLib.Bytes.new(plain_text.encode("utf-8"))
+            html_provider = Gdk.ContentProvider.new_for_bytes("text/html", html_bytes)
+            text_provider = Gdk.ContentProvider.new_for_bytes(
+                "text/plain;charset=utf-8", text_bytes
+            )
+            union_provider = Gdk.ContentProvider.new_union([html_provider, text_provider])
+            Gdk.Display.get_default().get_clipboard().set_content(union_provider)
+        except Exception:
+            logger.exception("Failed to set HTML clipboard")
 
     def _select_clip(self, clip_data: dict):
         """Select a clip: set clipboard and paste."""
-        self._copy_clip_to_clipboard(clip_data["id"])
+        self._set_clipboard(clip_data)
         self._close_window()
 
         # Small delay to let focus return, then simulate Ctrl+V
@@ -299,7 +321,7 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
             if selected:
                 clip_row = selected.get_child()
                 if isinstance(clip_row, ClipRow):
-                    self._copy_clip_to_clipboard(clip_row.clip_data["id"])
+                    self._set_clipboard(clip_row.clip_data)
             self._close_window()
             return True
 
