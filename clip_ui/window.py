@@ -293,10 +293,22 @@ class ClipManagerWindow(Gtk.ApplicationWindow):
     def _select_clip(self, clip_data: dict):
         """Select a clip: set clipboard and paste."""
         self._set_clipboard(clip_data)
-        self._close_window()
 
-        # Small delay to let focus return, then simulate Ctrl+V
-        GLib.timeout_add(150, self._simulate_paste)
+        if clip_data.get("content_type") == "html":
+            # GDK clipboard requires this window to remain alive as owner
+            # until the target app reads the clipboard after Ctrl+V.
+            # Hide instead of destroying; destroy 2s later once paste completes.
+            self._closed = True  # prevent focus-leave from closing early
+            self.set_visible(False)
+            GLib.timeout_add(150, self._simulate_paste)
+            GLib.timeout_add(2000, self._do_destroy)
+        else:
+            self._close_window()
+            GLib.timeout_add(150, self._simulate_paste)
+
+    def _do_destroy(self):
+        self.destroy()
+        return False
 
     def _simulate_paste(self):
         """Simulate Ctrl+V using wtype."""

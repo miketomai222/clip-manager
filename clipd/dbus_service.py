@@ -98,15 +98,17 @@ class ClipDaemonService(dbus.service.Object):
         if not entry:
             return False
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 ["wl-copy"],
-                input=entry.content,
-                text=True,
-                timeout=2,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
-            return proc.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            logger.error("wl-copy failed")
+            proc.stdin.write(entry.content.encode("utf-8"))
+            proc.stdin.close()
+            return True
+        except FileNotFoundError:
+            logger.error("wl-copy not found")
             return False
 
     @dbus.service.method(DBUS_INTERFACE,
